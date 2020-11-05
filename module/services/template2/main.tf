@@ -328,7 +328,7 @@ resource "aws_iam_policy" "policy3" {
         "codedeploy:GetApplicationRevision"
       ],
       "Resource": [
-        "arn:aws:codedeploy:us-east-1:041728207796:application:csye6225-webapp"
+        "arn:aws:codedeploy:us-east-1:931397163240:application:csye6225-webapp"
       ]
     },
     {
@@ -347,9 +347,9 @@ resource "aws_iam_policy" "policy3" {
         "codedeploy:GetDeploymentConfig"
       ],
       "Resource": [
-        "arn:aws:codedeploy:us-east-1:041728207796:deploymentconfig:CodeDeployDefault.OneAtATime",
-        "arn:aws:codedeploy:us-east-1:041728207796:deploymentconfig:CodeDeployDefault.HalfAtATime",
-        "arn:aws:codedeploy:us-east-1:041728207796:deploymentconfig:CodeDeployDefault.AllAtOnce"
+        "arn:aws:codedeploy:us-east-1:931397163240:deploymentconfig:CodeDeployDefault.OneAtATime",
+        "arn:aws:codedeploy:us-east-1:931397163240:deploymentconfig:CodeDeployDefault.HalfAtATime",
+        "arn:aws:codedeploy:us-east-1:931397163240:deploymentconfig:CodeDeployDefault.AllAtOnce"
       ]
     }
   ]
@@ -526,13 +526,13 @@ resource "aws_iam_role_policy_attachment" "role-attach" {
 
 # DNS Record
 data "aws_route53_zone" "selected" {
-  name         = "dev.martinyuan.me"
+  name         = "prod.martinyuan.me"
   private_zone = false
 }
 
 resource "aws_route53_record" "www" {
   zone_id = data.aws_route53_zone.selected.zone_id
-  name    = "api.dev.martinyuan.me"
+  name    = "api.prod.martinyuan.me"
   type    = "A"
   ttl     = "60"
   records = [aws_instance.ubuntu.public_ip]
