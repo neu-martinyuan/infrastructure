@@ -427,6 +427,7 @@ resource "aws_iam_policy_attachment" "user-attach4" {
   policy_arn = aws_iam_policy.policy4.arn
 }
 
+# EC2 instance policies
 resource "aws_iam_role_policy" "role-policy" {
   name = "CodeDeploy-EC2-S3"
   role = aws_iam_role.role1.id
@@ -470,6 +471,27 @@ resource "aws_iam_role_policy" "role-policy" {
                 "arn:aws:s3:::webapp.chaoyi.yuan",
                 "arn:aws:s3:::webapp.chaoyi.yuan/*"
             ]
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "cloudwatch:PutMetricData",
+                "ec2:DescribeVolumes",
+                "ec2:DescribeTags",
+                "logs:PutLogEvents",
+                "logs:DescribeLogStreams",
+                "logs:DescribeLogGroups",
+                "logs:CreateLogStream",
+                "logs:CreateLogGroup"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ssm:GetParameter"
+            ],
+            "Resource": "arn:aws:ssm:*:*:parameter/AmazonCloudWatch-*"
         }
       ]
   }
