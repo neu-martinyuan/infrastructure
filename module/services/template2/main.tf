@@ -50,6 +50,26 @@ resource "aws_route_table_association" "a" {
   route_table_id = aws_route_table.public_rt.id
 }
 
+# load balancer security group
+resource "aws_security_group" "load_balancer" {
+  name   = "lb_security_group"
+  vpc_id = aws_vpc.vpc.id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
 # Security group - application
 resource "aws_security_group" "application" {
   name        = "application"
@@ -70,15 +90,17 @@ resource "aws_security_group" "application" {
   }
 }
 
+
 # Security group ingress rule - application
 resource "aws_security_group_rule" "sample" {
-  count             = length(var.port)
-  type              = "ingress"
-  from_port         = element(var.port, count.index)
-  to_port           = element(var.port, count.index)
-  protocol          = "tcp"
-  cidr_blocks       = [var.sg_rule_cidr_block]
-  security_group_id = aws_security_group.application.id
+  count     = length(var.port)
+  type      = "ingress"
+  from_port = element(var.port, count.index)
+  to_port   = element(var.port, count.index)
+  protocol  = "tcp"
+  #cidr_blocks       = [var.sg_rule_cidr_block]
+  security_group_id        = aws_security_group.application.id
+  source_security_group_id = aws_security_group.load_balancer.id
 }
 
 # Security group ingress rule - application 3306 port
@@ -195,7 +217,7 @@ resource "aws_key_pair" "auth" {
   key_name   = var.ec2_key_name
   public_key = var.ec2_public_key
 }
-
+/*
 data "aws_ami" "ami" {
   most_recent = var.ec2_aws_ami
 
@@ -206,12 +228,13 @@ data "aws_ami" "ami" {
 
   owners = [var.dev_account]
 }
-
+*/
 resource "aws_iam_instance_profile" "instance_profile" {
   name = "jkfh"
   role = aws_iam_role.role1.name
 }
 
+/*
 resource "aws_instance" "ubuntu" {
   ami = data.aws_ami.ami.id
   connection {
@@ -245,7 +268,7 @@ echo BUCKET_NAME="${var.s3_bucket_name}" >> /etc/environment
   tags = {
     Name = "ubuntu"
   }
-}
+}*/
 
 # create dynamodb
 resource "aws_dynamodb_table" "table" {
@@ -555,8 +578,14 @@ resource "aws_route53_record" "www" {
   zone_id = data.aws_route53_zone.selected.zone_id
   name    = "api.prod.martinyuan.me"
   type    = "A"
-  ttl     = "60"
-  records = [aws_instance.ubuntu.public_ip]
+  #ttl     = "60"
+  #records = [aws_instance.ubuntu.public_ip]
+
+  alias {
+    name                   = aws_lb.alb.dns_name
+    zone_id                = aws_lb.alb.zone_id
+    evaluate_target_health = true
+  }
 }
 
 # Codedeploy application
@@ -587,4 +616,139 @@ resource "aws_codedeploy_deployment_group" "codedeploy-group" {
     enabled = true
     events  = ["DEPLOYMENT_FAILURE"]
   }
+}
+
+# load balancer
+resource "aws_lb" "alb" {
+  name               = "alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.load_balancer.id]
+  subnets            = aws_subnet.subnet123.*.id
+
+  #enable_deletion_protection = true
+}
+
+resource "aws_lb_target_group" "lbtg" {
+  name     = "tf-lb-tg"
+  port     = 9090
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.vpc.id
+  health_check {
+    path = "/hello"
+    port = 9090
+  }
+}
+
+resource "aws_lb_listener" "front_end" {
+  load_balancer_arn = aws_lb.alb.arn
+  port              = "80"
+  protocol          = "HTTP"
+  #ssl_policy        = "ELBSecurityPolicy-2016-08"
+  #certificate_arn   = "arn:aws:iam::187416307283:server-certificate/test_cert_rab3wuqwgja25ct3n4jdj2tzu4"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.lbtg.arn
+  }
+}
+
+data "aws_ami" "ami" {
+  most_recent = var.ec2_aws_ami
+
+  #filter {
+  #  name   = "AMI Name"
+  #  values = ["csye6225_*"]
+  #}
+
+  owners = [var.dev_account]
+}
+
+resource "aws_launch_configuration" "as_config" {
+  name                        = "asg_launch_config"
+  image_id                    = data.aws_ami.ami.id
+  instance_type               = "t2.micro"
+  key_name                    = "${aws_key_pair.auth.id}"
+  associate_public_ip_address = true
+  user_data                   = <<-EOF
+#!/bin/bash
+echo DB_USERNAME="${var.DB_USERNAME}" >> /etc/environment
+echo DB_PASSWORD="${var.DB_PASSWORD}" >> /etc/environment
+echo DB_NAME="${var.DB_NAME}" >> /etc/environment
+echo HOSTNAME="${aws_db_instance._.endpoint}" >> /etc/environment
+echo BUCKET_NAME="${var.s3_bucket_name}" >> /etc/environment
+  EOF
+  iam_instance_profile        = "${aws_iam_instance_profile.profile.name}"
+  security_groups             = [aws_security_group.application.id]
+}
+
+resource "aws_autoscaling_group" "as_group" {
+  name                      = "WebServerGroup"
+  default_cooldown          = 60
+  max_size                  = 5
+  min_size                  = 3
+  health_check_grace_period = 300
+  health_check_type         = "EC2"
+  desired_capacity          = 3
+  launch_configuration      = aws_launch_configuration.as_config.name
+  vpc_zone_identifier       = aws_subnet.subnet123.*.id
+
+  tag {
+    key                 = "Name"
+    value               = "ubuntu"
+    propagate_at_launch = true
+  }
+  target_group_arns = [aws_lb_target_group.lbtg.arn]
+}
+
+resource "aws_autoscaling_policy" "bat1" {
+  name                   = "WebServerScaleUpPolicy"
+  scaling_adjustment     = 1
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = 60
+  autoscaling_group_name = aws_autoscaling_group.as_group.name
+}
+
+resource "aws_autoscaling_policy" "bat2" {
+  name                   = "WebServerScaleDownPolicy"
+  scaling_adjustment     = -1
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = 60
+  autoscaling_group_name = aws_autoscaling_group.as_group.name
+}
+
+resource "aws_cloudwatch_metric_alarm" "bat3" {
+  alarm_name          = "CPUAlarmHigh"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = "60"
+  statistic           = "Average"
+  threshold           = "5"
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.as_group.name
+  }
+
+  alarm_description = "Scale-up if CPU > 5% for 1 minute"
+  alarm_actions     = [aws_autoscaling_policy.bat1.arn]
+}
+
+resource "aws_cloudwatch_metric_alarm" "bat4" {
+  alarm_name          = "CPUAlarmLow"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = "60"
+  statistic           = "Average"
+  threshold           = "3"
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.as_group.name
+  }
+
+  alarm_description = "Scale-up if CPU < 3% for 1 minute"
+  alarm_actions     = [aws_autoscaling_policy.bat1.arn]
 }
