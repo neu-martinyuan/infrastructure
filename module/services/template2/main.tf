@@ -514,6 +514,13 @@ resource "aws_iam_role_policy" "role-policy" {
                 "ssm:GetParameter"
             ],
             "Resource": "arn:aws:ssm:*:*:parameter/AmazonCloudWatch-*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "sns:Publish"
+            ],
+            "Resource": "arn:aws:sns:us-east-1:931397163240:fall2020"
         }
       ]
   }
@@ -576,7 +583,7 @@ data "aws_route53_zone" "selected" {
 
 resource "aws_route53_record" "www" {
   zone_id = data.aws_route53_zone.selected.zone_id
-  name    = "api.prod.martinyuan.me"
+  name    = "prod.martinyuan.me"
   type    = "A"
   #ttl     = "60"
   #records = [aws_instance.ubuntu.public_ip]
@@ -751,4 +758,128 @@ resource "aws_cloudwatch_metric_alarm" "bat4" {
 
   alarm_description = "Scale-up if CPU < 3% for 1 minute"
   alarm_actions     = [aws_autoscaling_policy.bat1.arn]
+}
+
+# Adding policy to new user named "serverless"
+# Giving the permission to S3
+resource "aws_iam_policy_attachment" "user-attach5" {
+  name       = "test-attachment5"
+  users      = ["serverless"]
+  policy_arn = aws_iam_policy.policy2.arn
+}
+
+# This policy allows the aws cli to deploy the lambda
+resource "aws_iam_policy" "policy5" {
+  name = "Lambda-Deploy"
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "lambda:UpdateFunctionCode"
+            ],
+            "Resource": [
+                "arn:aws:lambda:us-east-1:931397163240:function:lambda_function"
+            ]
+        }
+    ]
+}
+EOF
+}
+
+# Adding the previous policy5 to user "serverless"
+resource "aws_iam_policy_attachment" "user-attach6" {
+  name       = "test-attachment6"
+  users      = ["serverless"]
+  policy_arn = aws_iam_policy.policy5.arn
+}
+
+# Creating SNS Topic
+resource "aws_sns_topic" "user_updates" {
+  name = "fall2020"
+}
+
+# lambda role
+resource "aws_iam_role" "iam_for_lambda" {
+  name = "iam_for_lambda"
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Effect": "Allow",
+      "Sid": ""
+    }
+  ]
+}
+EOF
+}
+
+# three policies in lambda role
+resource "aws_iam_policy" "lambda_policy" {
+  name   = "lambda_policy"
+  policy = <<EOF
+{
+      "Version": "2012-10-17",
+      "Statement": [
+          {
+              "Effect": "Allow",
+              "Action": [
+                  "dynamodb:*",
+                  "ses:*",
+                  "logs:CreateLogGroup",
+                  "logs:CreateLogStream",
+                  "logs:PutLogEvents"
+              ],
+              "Resource": "*"
+          }
+      ]
+}
+EOF
+}
+
+resource "aws_iam_policy_attachment" "ses_db_lambda_role" {
+  name       = "ses_db_lambda_role"
+  roles      = [aws_iam_role.iam_for_lambda.name]
+  policy_arn = aws_iam_policy.lambda_policy.arn
+}
+
+resource "aws_lambda_function" "test_lambda" {
+  #filename      = "lambda_function_payload.zip"
+  s3_bucket     = "codedeploy.prod.martinyuan.me"
+  s3_key        = "function.zip"
+  function_name = "lambda_function"
+  role          = aws_iam_role.iam_for_lambda.arn
+  handler       = "main"
+
+  # The filebase64sha256() function is available in Terraform 0.11.12 and later
+  # For Terraform 0.11.11 and earlier, use the base64sha256() function and the file() function:
+  # source_code_hash = "${base64sha256(file("lambda_function_payload.zip"))}"
+  # source_code_hash = filebase64sha256("lambda_function_payload.zip")
+
+  runtime = "go1.x"
+}
+
+# Adding SNS trigger to lambda
+resource "aws_lambda_permission" "sns" {
+  statement_id  = "AllowExxcutionFromSNS"
+  action        = "lambda:InvokeFunction"
+  function_name = "lambda_function"
+  principal     = "sns.amazonaws.com"
+  source_arn    = aws_sns_topic.user_updates.arn
+}
+
+# Adding sns subscription to lambda
+resource "aws_sns_topic_subscription" "subscription" {
+  topic_arn = aws_sns_topic.user_updates.arn
+  protocol  = "LAMBDA"
+  endpoint  = aws_lambda_function.test_lambda.arn
 }
