@@ -130,7 +130,7 @@ variable "rds_engine_version" {
 
 variable "rds_instance_class" {
   type    = string
-  default = "db.t2.micro"
+  default = "db.t3.micro"
 }
 
 variable "rds_allocated_storage" {
@@ -140,7 +140,7 @@ variable "rds_allocated_storage" {
 
 variable "rds_storage_encrypted" {
   type    = bool
-  default = false
+  default = true
 }
 
 variable "rds_name" {
