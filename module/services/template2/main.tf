@@ -56,8 +56,8 @@ resource "aws_security_group" "load_balancer" {
   vpc_id = aws_vpc.vpc.id
 
   ingress {
-    from_port   = 80
-    to_port     = 80
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -194,6 +194,8 @@ resource "aws_db_instance" "_" {
   publicly_accessible     = var.rds_publicly_accessible
   storage_encrypted       = var.rds_storage_encrypted
   storage_type            = var.storage_type
+  parameter_group_name    = aws_db_parameter_group.db-parameter.id
+  apply_immediately       = true
 
   vpc_security_group_ids = [aws_security_group.database.id]
 
@@ -649,10 +651,10 @@ resource "aws_lb_target_group" "lbtg" {
 
 resource "aws_lb_listener" "front_end" {
   load_balancer_arn = aws_lb.alb.arn
-  port              = "80"
-  protocol          = "HTTP"
-  #ssl_policy        = "ELBSecurityPolicy-2016-08"
-  #certificate_arn   = "arn:aws:iam::187416307283:server-certificate/test_cert_rab3wuqwgja25ct3n4jdj2tzu4"
+  port              = "443"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  certificate_arn   = "arn:aws:acm:us-east-1:931397163240:certificate/f22d063b-0ec4-4bcc-98ac-c821d71de3c6"
 
   default_action {
     type             = "forward"
@@ -687,6 +689,10 @@ echo BUCKET_NAME="${var.s3_bucket_name}" >> /etc/environment
   EOF
   iam_instance_profile        = "${aws_iam_instance_profile.profile.name}"
   security_groups             = [aws_security_group.application.id]
+
+  root_block_device {
+    volume_size = var.ec2_volume_size
+  }
 }
 
 resource "aws_autoscaling_group" "as_group" {
@@ -882,4 +888,16 @@ resource "aws_sns_topic_subscription" "subscription" {
   topic_arn = aws_sns_topic.user_updates.arn
   protocol  = "LAMBDA"
   endpoint  = aws_lambda_function.test_lambda.arn
+}
+
+resource "aws_db_parameter_group" "db-parameter" {
+  name   = "rds-pg"
+  family = "mysql8.0"
+
+  parameter {
+    name         = "performance_schema"
+    value        = "1"
+    apply_method = "pending-reboot"
+  }
+
 }
